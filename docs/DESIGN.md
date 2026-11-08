@@ -28,8 +28,9 @@ phcpp owns exactly three things: the lowering (C++23RA → C), the phext
 layout below, and the tooling that enforces it (`tools/phcpp.py`:
 pack / verify / unpack). phcc owns everything after the handoff:
 parsing C, code generation, linking. phcpp carries no fork of phcc's
-tree; its baseline is a phcc *commit* (`d0659ba4`, the gate-green
-tip) named in every phext it packs and in PATCHES.md.
+tree; its baseline is a phcc *commit* (`36a7932f`, the Wave D7
+publication tip; `d0659ba4` at seed) named in every phext it packs
+and in PATCHES.md.
 
 ## 2. Phext layout
 
@@ -40,8 +41,9 @@ and vice versa) and adds one volume:
 
 | Address | Holds |
 |---|---|
-| `1.1.1/1.2.10/1.1.1` | Placement manifest: per file — kind, path, coordinate, SHA-256, size. Kinds: `c`, `cpp-commentary`. |
+| `1.1.1/1.2.10/1.1.1` | Placement manifest: per file — kind, path, coordinate, SHA-256, size. Kinds: `c`, `cpp-commentary`. A pack made by the front end also names the **feature ledger** scroll here (coordinate + SHA-256 + size, no `kind=` — so `unpack` never exports it). |
 | `1.1.1/1.2.10/1.2.1` | Layout notes scroll (what pack wrote, in words). |
+| `1.1.1/1.2.10/1.3.1` | **Feature ledger** (front-end v1, §8): the C++23RA per-construct revision ledger for the lowered TU — construct registry line, per-symbol construct sets with minimal-revision stamps, per-member rows whose SHA-256s are the Volume 3 segment hashes (an edit to a member segment demotes its stamp on re-verify, per ABI-REVISIONS §6). |
 | Collection 4, Volume 2 | Lowered C, whole-file scrolls — the only file scrolls `unpack` exports. Placed as phcc places C: Book = module, Chapter = component, Section = file. |
 | Collection 4, Volume 3 | Member segmentation of the lowered C: index scroll + segment scrolls with `#phcc-member` headers (kind/name/span/SHA-256), payloads tiling each C file exactly. Identical in form to phcc's Volume 3, so phcc's member tooling (analyze, the statement tier) works on lowered C unchanged. |
 | Collection 4, Volume 4 | **The C++23RA source, segmented**: index scroll + segment scrolls, each opening with a `#phcpp-commentary` header line (kind/name/span/SHA-256), payloads tiling each C++23RA file exactly. |
@@ -136,8 +138,11 @@ tomorrow) can apply and a reader can check in the phext:
   depends on — so a construct's revision can move without forcing
   the world to recompile. The full model (feature ledger,
   name-stability rule, link-time enforcement via symbol
-  versioning) is `docs/ABI-REVISIONS.md`. It is design, not
-  mechanism: no ledger exists until a mechanical lowerer does.
+  versioning) is `docs/ABI-REVISIONS.md`. As of front-end v1 (§8)
+  the ledger and the per-symbol stamps are mechanism, emitted with
+  every lowered TU and recomputed by `verify`; link-time
+  enforcement (phcc F28 symbol versioning) remains a later step —
+  v1 stamps and records, it does not yet enforce.
 
 ### In / out for v0 — honestly
 
@@ -160,11 +165,20 @@ beyond ctor/dtor pairing; concepts *checking* (an instantiated
 constrained template lowers fine — verifying the constraint is the
 front end's job, §4).
 
-## 4. The front-end question — proposal, Will rules
+## 4. The front-end question — RULED (Will, 2026-11-08)
 
 Nothing in §§1–3 answers how C++23RA text becomes an AST to lower
 from. That is the programme's biggest open decision, and this
 document's job is to price the options, not to smuggle one in.
+
+**Ruling: run both tracks.** Will ruled the dual-track
+recommendation below into programme fact on 2026-11-08. Front-end
+v1 (§8) implements both tracks behind the same lowering model and
+phext layout, and the differential corpus arbitrates them: on the
+v1 corpus the two tracks' lowered C, ledgers, and packed phexts are
+byte-identical for every TU in the subset, and refusals agree by
+name. The option pricing below is kept as the record of the
+decision.
 
 **Option A — hand-rolled subset parser, grown by slices.** Full
 control; phext-native from the first commit; the lowering stays a
@@ -258,3 +272,186 @@ library, a corpus beyond one program. The slice's lowering was done
 layout notes, and its receipts — it proves the handoff loop and the
 commentary discipline end-to-end, and it is the template the first
 mechanical lowerer will be graded against.
+
+Front-end v1 (§8) supersedes the "what does not" list: two
+mechanical lowerers and a 21-case differential corpus now exist.
+The seed slice's phext stands as packed at seed time, against the
+seed baseline it names; it is not repacked by v1.
+
+## 8. Front-end v1 (2026-11-08)
+
+### 8.1 Architecture
+
+Both tracks build one shared intermediate representation
+(`tools/phcpp_ir.py`); one emitter produces the C, the phext member
+segmentation, and the feature ledger as a pure function of the IR —
+no track identity survives into the bytes.
+
+- **Track 1** (`tools/phcpp_track1.py`): a hand-rolled subset
+  parser. Declarations are collected first (classes, templates,
+  signatures), bodies are parsed against the complete registry, and
+  template bodies are re-parsed per instantiation under a
+  substitution environment.
+- **Track 2** (`tools/phcpp_track2.py`): an adapter over clang 18's
+  JSON AST dump (`clang++ -std=c++23 -x c++ -Xclang -ast-dump=json
+  -fsyntax-only -`, the TU fed on stdin; main-file nodes are
+  separated from the header closure by location discipline). A
+  prescan refuses whole construct families wherever they hide in
+  the dump; translation proper is two-phase like track 1.
+- **Driver** (`tools/phcpp_front.py`): `lower | pack | stamps
+  --track 1|2`. Named refusals exit 3 printing `phcpp: REFUSE
+  <code>: <detail>`; parse errors exit 4; clang failures exit 5.
+  A pack asserts the ledger's member rows align 1:1, in order, with
+  the segmenter's non-gap segments of the emitted C.
+- **Corpus runner** (`tools/run_corpus.py`): writes
+  `examples/corpus/RECEIPTS.md`.
+
+### 8.2 The v1 subset
+
+In (anything else is refused by name, §8.3):
+
+- `#include <cstdio>` only; `printf` and `std::printf`.
+- Namespaces, including nested; `typedef` / `using` type aliases.
+- Classes/structs with single public inheritance; data members;
+  static data members with out-of-line definitions; static member
+  functions; member functions defined in-class or out-of-line;
+  constructors with member-init lists (including a base-ctor
+  entry), `explicit`; destructors, including virtual and
+  `= default`; virtual functions (pure, `override`).
+- Function templates and class templates, implicit instantiation
+  only; class-template member definitions in-class only.
+- Free functions; overloading by arity and by argument type;
+  constructor selection is likewise type-aware.
+- References (parameters, locals, returns); default arguments
+  whose expressions are literals or globals.
+- Non-capturing lambdas — bound to an `auto` or function-pointer
+  variable, or passed directly as a call argument; a
+  value-returning lambda needs an explicit `->` return type.
+- `new` / `delete` on single objects; temporaries, destroyed at
+  the end of the enclosing full expression; copy-initialisation
+  via the implicit memberwise copy (user copy/move constructors
+  are refused, §8.3).
+- Aggregate initialisation of classes with no declared
+  constructors, no base, and no polymorphism.
+- Range-`for` over arrays (by value, or by `const T&` — a
+  reference loop variable binds to the element, no copy);
+  classic `for` / `while` / `do-while`; `if`/`else`;
+  `break` / `continue`.
+
+### 8.3 Refused by name (the v1 refusal registry)
+
+`exceptions`, `rtti-dynamic-cast`, `rtti-typeid`,
+`multiple-inheritance`, `virtual-inheritance`,
+`capturing-lambda`, `lambda-return-type`, `stl-facility`,
+`include-outside-subset`, `operator-overload`,
+`move-semantics`, `rvalue-reference`, `coroutine`,
+`concept-requires`, `enum`, `union`, `friend`,
+`nested-class`, `user-copy-ctor`, `reference-field`,
+`global-class-object` (no global constructor mechanism in v1),
+`no-matching-constructor`, `no-matching-function`,
+`ambiguous-call`, `temporary-in-condition`, `switch-statement`,
+`goto-statement`, `static-local-variable`, `field-shadowing`,
+`array-new-delete`, `delegating-constructor`,
+`default-member-initializer`, `member-template`,
+`range-for-nonarray`, `using-declaration`, `using-namespace`,
+`linkage-spec`, `preprocessor-directive`, `auto-nonlambda`.
+A refusal is a first-class output: never a silent mis-lowering.
+
+Two refusal entries are legitimately track-split, and the corpus
+records them as pairs: `move-semantics` (track 1 reaches the
+`<utility>` include first: `include-outside-subset`; track 2 sees
+`std::move` itself) and `coroutine` (track 1 keywords;
+track 2's clang forms no AST, so `clang-error`). The detection
+point differs; the refusal does not.
+
+### 8.4 Mechanised lowering conventions (delta on §3)
+
+- Every generated function is `static` except `main`. `bool`
+  lowers to `int`.
+- A virtual method occupying a vtable slot takes `void *self_` /
+  `const void *self_` and casts to the concrete type in its
+  prologue (the hand slice's convention), so vtable instances
+  type-check exactly. The vtable *struct type* is the nearest
+  ancestor's whose slot list is unchanged; the vtable *instance*
+  is `<Class>_vtable`.
+- Class-by-value returns lower through a hidden `__ret`
+  out-parameter (construct `calling.byvalue-out`). `new` /
+  `delete` lower through per-class helpers `__new_<C>_<nargs>` /
+  `__delete_<C>` in plain C.
+- Where one name has more than one distinct signature, **all** its
+  overloads are mangled with an `__<argtypes>` suffix (`__void`
+  for none). Pointers mangle `_ptr`, references `_ref`; `const`
+  does not mangle; namespaces flatten with `_`.
+- A derived→base pointer flow inserts the layout-prefix cast the
+  C++ upcast implies, made explicit.
+- Class-template instantiation is lazy, as in C++: only member
+  functions a kept body calls — or that occupy a vtable slot —
+  are emitted. Track 1 reaches this by a fixpoint prune over its
+  own IR; track 2 inherits it from clang's instantiation. This
+  was the corpus's sharpest asymmetry before it was closed.
+- Temporaries created by a constructor's init list are destroyed
+  at the end of that constructor call in v1; C++ destroys them at
+  the end of the enclosing full expression. Unobservable in the
+  subset unless a member constructor stores a pointer to the
+  temporary — recorded here as a known approximation.
+- Constructor selection is type-aware (exact match, then
+  derived→base, then scalar/array decay). The one exception is
+  `new`: `__new_<C>_<nargs>` helpers select by arity, so two
+  same-arity constructors of different types are not yet
+  distinguished at a `new` site.
+
+### 8.5 The ledger as mechanism
+
+Per ABI-REVISIONS §6, each lowered TU's ledger is stored per
+member, alongside the member segmentation: the ledger scroll
+(§2) carries the construct registry, one row per symbol (its
+construct set and its minimal-revision stamp — the maximum
+revision among the constructs its own lowering depends on), one
+row per emitted member binding that member's Volume 3 segment
+SHA-256, and the TU's required-revision union. `phcpp verify`
+recomputes every stamp from an independent copy of the registry
+table and re-hashes every member segment: edit a segment and its
+stamp demotes at verify time. In v1 every construct is revision
+1, so stamps are uniformly `r1` — what the corpus receipts is the
+per-symbol construct sets and the recomputation machinery, not
+yet a revision move.
+
+Construct registry (all revision 1 in v1): `mangling.readable`,
+`namespace.flatten`, `layout.struct`, `vtable.shape`,
+`ctor-dtor.explicit`, `calling.explicit-this`,
+`calling.byvalue-out`, `template.instantiation`,
+`reference.pointer`, `lambda.closureless`.
+
+### 8.6 Track asymmetries found by the corpus, and their verdicts
+
+- **Ledger fidelity (the §4 caveat):** on this corpus the caveat
+  does not bite. Both tracks produce byte-identical ledgers for
+  every TU — clang's pre-folding (implicit base/member
+  initialisers, conversion-operator calls for lambda→fnptr,
+  elided copies delivered as construct nodes) is normalised in
+  the adapter to the same IR the subset parser builds, and the
+  corpus is the arbiter that caught each case. The caveat stays
+  on record for wider language surface: it is a statement about
+  clang, retired per-construct only by corpus receipts.
+- A qualified member call (`a->Animal::legs()`) suppresses
+  dispatch in C++; clang's JSON exposes no qualifier on
+  `MemberExpr`, so track 2 reads it from the source text the
+  node's range spans (the range begins at the arrow and contains
+  `::name` exactly for qualified calls). Track 1 knows from its
+  grammar. Both emit the direct base call; receipted in
+  `04_inherit.cpp`.
+- clang spells a lambda call operator's type with the placeholder
+  `auto` even when a trailing return type is written; track 2
+  recovers the written type from the source, and refuses a
+  value-returning lambda without one — track 1's rule, same code
+  (`lambda-return-type`).
+
+### 8.7 Receipts
+
+`examples/corpus/RECEIPTS.md`: 10 positive TUs spanning the
+subset + 11 refusal TUs. **21/21 pass** (2026-11-08, aletheia-core,
+phcc baseline `36a7932f`): for every positive TU, both tracks'
+lowered C compiles under phcc and runs byte-identical to
+`g++ -std=c++23`; C, ledger, and packed phext are byte-identical
+across tracks; every pack passes `phcpp verify`; every refusal
+TU is refused by name on both tracks.
