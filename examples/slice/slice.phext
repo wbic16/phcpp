@@ -1,0 +1,421 @@
+phcpp-manifest 1
+phcpp-version: 0.0.0
+phcc-baseline: d0659ba4
+kind=c	path=examples/slice/lowered/slice.c	coord=1.1.1/4.2.1/1.1.1	sha256=dd16c96876b7aac7cc27f9d2a01462fb70086b5daa82e974c8a328980bff6b9d	size=3348
+kind=cpp-commentary	path=examples/slice/slice.cpp	coord=1.1.1/4.4.1/1.1.1	sha256=913c1a1eed29f090e68308edf788779d130193338dec791166eb24d8c2d44cc8	size=1671
+# slice.phext — layout notes (phcpp pack, v0)
+
+One file: a C++23 translation unit, its hand-lowered C, and the
+provenance binding them. Outer dimensions 1.1.1 throughout.
+
+- Collection 1 (Meta), Volume 2, Book 10: Section 1 = placement
+  manifest (kind, path, coordinate, SHA-256, size); Section 2 = this
+  notes scroll. Kinds: `c` (build input) and `cpp-commentary`
+  (provenance only — never a build input).
+- Collection 4 (Source), Volume 2, Book 1, Chapter 1, Section 1:
+  the lowered C file, whole bytes — the only file scroll `unpack`
+  will export for building, byte-identical to the tree's
+  examples/slice/lowered/slice.c.
+- Collection 4 (Source), Volume 3: member segmentation of the
+  lowered C — index scroll + segment scrolls carrying `#phcc-member`
+  headers, exactly phcc's format; payloads tile the C file exactly.
+- Collection 4 (Source), Volume 4: the C++ source, segmented — index
+  scroll + segment scrolls carrying `#phcpp-commentary` headers.
+  There is deliberately NO whole-file C++ scroll in Volume 2: the
+  C++ exists only as commentary segments, so no manifest-driven
+  tool can mistake it for a build input. Its whole-file bytes are
+  recoverable by tiling and `verify` proves the tiling against the
+  manifest's SHA-256.
+- phcc baseline: d0659ba4. phcpp version: 0.0.0.
+/* slice.c — hand-lowered C for slice.cpp (phcpp v0 vertical slice).
+ *
+ * Lowered BY HAND for v0 and labelled as such everywhere it is
+ * mentioned: no phcpp front end exists yet. The lowering follows the
+ * conventions stated in docs/DESIGN.md:
+ *   - a polymorphic class becomes a struct whose first member is a
+ *     pointer to a vtable struct (function pointers in declaration
+ *     order, destructor slot first);
+ *   - a constructor becomes Type_init, a destructor Type_destroy,
+ *     called explicitly at the point C++ would run it;
+ *   - each template instantiation becomes one C function named
+ *     <template>__<argument types> (v0 mangling);
+ *   - a virtual call s->m(...) becomes s->vptr->m(s, ...).
+ */
+#include <stdio.h>
+
+/* ---- struct Shape (abstract; lowered from slice.cpp) ---- */
+struct Shape_vtable {
+    void (*destroy)(void *self);
+    double (*area)(const void *self);
+    const char *(*name)(const void *self);
+};
+struct Shape {
+    const struct Shape_vtable *vptr;
+};
+
+/* ---- struct Circle : Shape ---- */
+struct Circle {
+    const struct Shape_vtable *vptr;
+    double r;
+};
+static void Circle_destroy(void *self) { (void)self; }
+static double Circle_area(const void *self) {
+    const struct Circle *c = (const struct Circle *)self;
+    return 3.141592653589793 * c->r * c->r;
+}
+static const char *Circle_name(const void *self) {
+    (void)self;
+    return "circle";
+}
+static const struct Shape_vtable Circle_vtable = {
+    Circle_destroy, Circle_area, Circle_name
+};
+static void Circle_init(struct Circle *c, double radius) {
+    c->vptr = &Circle_vtable;
+    c->r = radius;
+}
+
+/* ---- struct Square : Shape ---- */
+struct Square {
+    const struct Shape_vtable *vptr;
+    double s;
+};
+static void Square_destroy(void *self) { (void)self; }
+static double Square_area(const void *self) {
+    const struct Square *q = (const struct Square *)self;
+    return q->s * q->s;
+}
+static const char *Square_name(const void *self) {
+    (void)self;
+    return "square";
+}
+static const struct Shape_vtable Square_vtable = {
+    Square_destroy, Square_area, Square_name
+};
+static void Square_init(struct Square *q, double side) {
+    q->vptr = &Square_vtable;
+    q->s = side;
+}
+
+/* ---- add<T>: two instantiations ---- */
+static int add__int(int a, int b) { return a + b; }
+static double add__double(double a, double b) { return a + b; }
+
+/* ---- struct Tracer (destructor has an observable side effect) ---- */
+struct Tracer {
+    const char *id;
+};
+static void Tracer_init(struct Tracer *t, const char *name) {
+    t->id = name;
+    printf("tracer %s constructed\n", t->id);
+}
+static void Tracer_destroy(struct Tracer *t) {
+    printf("tracer %s destroyed\n", t->id);
+}
+
+int main(void) {
+    struct Circle c;
+    struct Square q;
+    struct Shape *shapes[2];
+    int i;
+    Circle_init(&c, 2.0);
+    Square_init(&q, 3.0);
+    shapes[0] = (struct Shape *)&c;
+    shapes[1] = (struct Shape *)&q;
+    for (i = 0; i < 2; i++) {
+        struct Shape *s = shapes[i];
+        printf("%s area %.2f\n", s->vptr->name(s), s->vptr->area(s));
+    }
+    printf("add int %d\n", add__int(19, 23));
+    printf("add double %.1f\n", add__double(1.25, 2.25));
+    {
+        struct Tracer t;
+        Tracer_init(&t, "inner");
+        printf("inside scope\n");
+        Tracer_destroy(&t);
+    }
+    printf("after scope\n");
+    return 0;
+}
+2	gap	-	0-725	618f3247f00c68be666e53cca79081800c305fc642f5eb44b1bec82fc0c9ff8d
+3	gap	-	725-744	d3139b187138b0a2b1fd9b889746cb293f2dfc1ec526153bb345b1617eca9ef4
+4	gap	-	744-809	3905d23d818b855c4404e97923a053dc60e0acf55ab912d6c010ce8657d56ffa
+5	type	Shape_vtable	809-947	afcbf5f56f103511f795af7238ed2205be97b1234bbb631a7f9eb4f6017e2d89
+6	gap	-	947-948	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+7	type	Shape	948-1002	54672805d2cd78986574a1e59beb4ec544b6de7dc56b849e8379a2c318844647
+8	gap	-	1002-1042	67d549d4481f6a98230e24cd8ebe1e2f00cca163c2368981218ecc96eb7f4e5e
+9	type	Circle	1042-1111	aa9bcb229d874455df7baef66d0655b884db3fed19a7d4d09fa4c1b1be030542
+10	gap	-	1111-1112	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+11	function	Circle_destroy	1112-1166	adaacf3a9321eb10c46ac46d212fbf9c8f0b8e042594b55ec324d80329f51aa3
+12	gap	-	1166-1167	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+13	function	Circle_area	1167-1316	2c58b142752660e60e6f47d1655bb4072879712985a8ca1186002469cac62bd1
+14	gap	-	1316-1317	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+15	function	Circle_name	1317-1406	59e94eb67b52fc7792df26aadb6e514e7996a87dbf44a3a4fb15909d9494646d
+16	gap	-	1406-1407	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+17	object	static	1407-1505	4b1044012a5fef6a384a987c292067207452194bd7a39825f4a4c878aa472ba1
+18	gap	-	1505-1506	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+19	function	Circle_init	1506-1615	f37a344526959352db42211b05eaab84232eb02cf201feaa29a4b106a4cc6afa
+20	gap	-	1615-1655	df956ca643fe8bbfee6482931e95b093699f990cc46a2ebf9e03ee19ec78e808
+21	type	Square	1655-1724	40a6fd5d4c5f3ddc95331fd0b9a4f7dcbd4c9abd5914425bd99289369c118a31
+22	gap	-	1724-1725	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+23	function	Square_destroy	1725-1779	749fea77cb51b51d4b02c5386c0359fa6e9c3494e5939819a40a2c45d419e64b
+24	gap	-	1779-1780	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+25	function	Square_area	1780-1909	f029a0ec47c05807c8797932a748b825346f0c4123adeef339ce681ba310535c
+26	gap	-	1909-1910	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+27	function	Square_name	1910-1999	89a09aef2c36fc00df49bdd737128bad89c3fc95e3e8105b55b20c740d863aff
+28	gap	-	1999-2000	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+29	object	static	2000-2098	3b7bb12625d042350ab83767de67d16cc6f30fc9c5b5c211f04abffea160b437
+30	gap	-	2098-2099	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+31	function	Square_init	2099-2204	f845562aa92af0d09381e4a836ef58cac118317df75c729522713acc79a1e407
+32	gap	-	2204-2249	eb3ba0c6370a196f7792613c84501505bbf2e0817e3ce109523e243cd25dedd6
+33	function	add__int	2249-2300	a999480515598f4a615052bc89cc3179dc9c6503b54c95fdbb9fe14d1eddb38b
+34	gap	-	2300-2301	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+35	function	add__double	2301-2364	a27849a9bbbc7da018891e341717b20c3dad5d7e8e7033b3c23ca8a052a606c2
+36	gap	-	2364-2439	a24dd571431235915b9b7957f007bc0b98e6434dbd63156814b1edd94ca52d68
+37	type	Tracer	2439-2477	d6ff89eac858f7a80c2d850ec1845934e3a6ea899b0c155239e69884b65e0aae
+38	gap	-	2477-2478	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+39	function	Tracer_init	2478-2605	af6e4ba74cd24906bd7cccee88304e97d7a4745b2716c51255956b7aa8b2e6ab
+40	gap	-	2605-2606	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+41	function	Tracer_destroy	2606-2698	722658710fe81d3fbb5831523d1a94d76d8eccf1662d39ff50029c69e27a7d15
+42	gap	-	2698-2700	75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+43	function	main	2700-3347	be929242da05a0d23033bfe49364d0a6532274c60317c6ceb27a89d36313f765
+44	gap	-	3347-3348	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+#phcc-member	kind=gap	name=-	span=0-725	sha256=618f3247f00c68be666e53cca79081800c305fc642f5eb44b1bec82fc0c9ff8d
+/* slice.c — hand-lowered C for slice.cpp (phcpp v0 vertical slice).
+ *
+ * Lowered BY HAND for v0 and labelled as such everywhere it is
+ * mentioned: no phcpp front end exists yet. The lowering follows the
+ * conventions stated in docs/DESIGN.md:
+ *   - a polymorphic class becomes a struct whose first member is a
+ *     pointer to a vtable struct (function pointers in declaration
+ *     order, destructor slot first);
+ *   - a constructor becomes Type_init, a destructor Type_destroy,
+ *     called explicitly at the point C++ would run it;
+ *   - each template instantiation becomes one C function named
+ *     <template>__<argument types> (v0 mangling);
+ *   - a virtual call s->m(...) becomes s->vptr->m(s, ...).
+ */
+#phcc-member	kind=gap	name=-	span=725-744	sha256=d3139b187138b0a2b1fd9b889746cb293f2dfc1ec526153bb345b1617eca9ef4
+#include <stdio.h>
+#phcc-member	kind=gap	name=-	span=744-809	sha256=3905d23d818b855c4404e97923a053dc60e0acf55ab912d6c010ce8657d56ffa
+
+/* ---- struct Shape (abstract; lowered from slice.cpp) ---- */
+#phcc-member	kind=type	name=Shape_vtable	span=809-947	sha256=afcbf5f56f103511f795af7238ed2205be97b1234bbb631a7f9eb4f6017e2d89
+struct Shape_vtable {
+    void (*destroy)(void *self);
+    double (*area)(const void *self);
+    const char *(*name)(const void *self);
+};#phcc-member	kind=gap	name=-	span=947-948	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=type	name=Shape	span=948-1002	sha256=54672805d2cd78986574a1e59beb4ec544b6de7dc56b849e8379a2c318844647
+struct Shape {
+    const struct Shape_vtable *vptr;
+};#phcc-member	kind=gap	name=-	span=1002-1042	sha256=67d549d4481f6a98230e24cd8ebe1e2f00cca163c2368981218ecc96eb7f4e5e
+
+
+/* ---- struct Circle : Shape ---- */
+#phcc-member	kind=type	name=Circle	span=1042-1111	sha256=aa9bcb229d874455df7baef66d0655b884db3fed19a7d4d09fa4c1b1be030542
+struct Circle {
+    const struct Shape_vtable *vptr;
+    double r;
+};#phcc-member	kind=gap	name=-	span=1111-1112	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Circle_destroy	span=1112-1166	sha256=adaacf3a9321eb10c46ac46d212fbf9c8f0b8e042594b55ec324d80329f51aa3
+static void Circle_destroy(void *self) { (void)self; }#phcc-member	kind=gap	name=-	span=1166-1167	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Circle_area	span=1167-1316	sha256=2c58b142752660e60e6f47d1655bb4072879712985a8ca1186002469cac62bd1
+static double Circle_area(const void *self) {
+    const struct Circle *c = (const struct Circle *)self;
+    return 3.141592653589793 * c->r * c->r;
+}#phcc-member	kind=gap	name=-	span=1316-1317	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Circle_name	span=1317-1406	sha256=59e94eb67b52fc7792df26aadb6e514e7996a87dbf44a3a4fb15909d9494646d
+static const char *Circle_name(const void *self) {
+    (void)self;
+    return "circle";
+}#phcc-member	kind=gap	name=-	span=1406-1407	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=object	name=static	span=1407-1505	sha256=4b1044012a5fef6a384a987c292067207452194bd7a39825f4a4c878aa472ba1
+static const struct Shape_vtable Circle_vtable = {
+    Circle_destroy, Circle_area, Circle_name
+};#phcc-member	kind=gap	name=-	span=1505-1506	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Circle_init	span=1506-1615	sha256=f37a344526959352db42211b05eaab84232eb02cf201feaa29a4b106a4cc6afa
+static void Circle_init(struct Circle *c, double radius) {
+    c->vptr = &Circle_vtable;
+    c->r = radius;
+}#phcc-member	kind=gap	name=-	span=1615-1655	sha256=df956ca643fe8bbfee6482931e95b093699f990cc46a2ebf9e03ee19ec78e808
+
+
+/* ---- struct Square : Shape ---- */
+#phcc-member	kind=type	name=Square	span=1655-1724	sha256=40a6fd5d4c5f3ddc95331fd0b9a4f7dcbd4c9abd5914425bd99289369c118a31
+struct Square {
+    const struct Shape_vtable *vptr;
+    double s;
+};#phcc-member	kind=gap	name=-	span=1724-1725	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Square_destroy	span=1725-1779	sha256=749fea77cb51b51d4b02c5386c0359fa6e9c3494e5939819a40a2c45d419e64b
+static void Square_destroy(void *self) { (void)self; }#phcc-member	kind=gap	name=-	span=1779-1780	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Square_area	span=1780-1909	sha256=f029a0ec47c05807c8797932a748b825346f0c4123adeef339ce681ba310535c
+static double Square_area(const void *self) {
+    const struct Square *q = (const struct Square *)self;
+    return q->s * q->s;
+}#phcc-member	kind=gap	name=-	span=1909-1910	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Square_name	span=1910-1999	sha256=89a09aef2c36fc00df49bdd737128bad89c3fc95e3e8105b55b20c740d863aff
+static const char *Square_name(const void *self) {
+    (void)self;
+    return "square";
+}#phcc-member	kind=gap	name=-	span=1999-2000	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=object	name=static	span=2000-2098	sha256=3b7bb12625d042350ab83767de67d16cc6f30fc9c5b5c211f04abffea160b437
+static const struct Shape_vtable Square_vtable = {
+    Square_destroy, Square_area, Square_name
+};#phcc-member	kind=gap	name=-	span=2098-2099	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Square_init	span=2099-2204	sha256=f845562aa92af0d09381e4a836ef58cac118317df75c729522713acc79a1e407
+static void Square_init(struct Square *q, double side) {
+    q->vptr = &Square_vtable;
+    q->s = side;
+}#phcc-member	kind=gap	name=-	span=2204-2249	sha256=eb3ba0c6370a196f7792613c84501505bbf2e0817e3ce109523e243cd25dedd6
+
+
+/* ---- add<T>: two instantiations ---- */
+#phcc-member	kind=function	name=add__int	span=2249-2300	sha256=a999480515598f4a615052bc89cc3179dc9c6503b54c95fdbb9fe14d1eddb38b
+static int add__int(int a, int b) { return a + b; }#phcc-member	kind=gap	name=-	span=2300-2301	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=add__double	span=2301-2364	sha256=a27849a9bbbc7da018891e341717b20c3dad5d7e8e7033b3c23ca8a052a606c2
+static double add__double(double a, double b) { return a + b; }#phcc-member	kind=gap	name=-	span=2364-2439	sha256=a24dd571431235915b9b7957f007bc0b98e6434dbd63156814b1edd94ca52d68
+
+
+/* ---- struct Tracer (destructor has an observable side effect) ---- */
+#phcc-member	kind=type	name=Tracer	span=2439-2477	sha256=d6ff89eac858f7a80c2d850ec1845934e3a6ea899b0c155239e69884b65e0aae
+struct Tracer {
+    const char *id;
+};#phcc-member	kind=gap	name=-	span=2477-2478	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Tracer_init	span=2478-2605	sha256=af6e4ba74cd24906bd7cccee88304e97d7a4745b2716c51255956b7aa8b2e6ab
+static void Tracer_init(struct Tracer *t, const char *name) {
+    t->id = name;
+    printf("tracer %s constructed\n", t->id);
+}#phcc-member	kind=gap	name=-	span=2605-2606	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcc-member	kind=function	name=Tracer_destroy	span=2606-2698	sha256=722658710fe81d3fbb5831523d1a94d76d8eccf1662d39ff50029c69e27a7d15
+static void Tracer_destroy(struct Tracer *t) {
+    printf("tracer %s destroyed\n", t->id);
+}#phcc-member	kind=gap	name=-	span=2698-2700	sha256=75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+
+
+#phcc-member	kind=function	name=main	span=2700-3347	sha256=be929242da05a0d23033bfe49364d0a6532274c60317c6ceb27a89d36313f765
+int main(void) {
+    struct Circle c;
+    struct Square q;
+    struct Shape *shapes[2];
+    int i;
+    Circle_init(&c, 2.0);
+    Square_init(&q, 3.0);
+    shapes[0] = (struct Shape *)&c;
+    shapes[1] = (struct Shape *)&q;
+    for (i = 0; i < 2; i++) {
+        struct Shape *s = shapes[i];
+        printf("%s area %.2f\n", s->vptr->name(s), s->vptr->area(s));
+    }
+    printf("add int %d\n", add__int(19, 23));
+    printf("add double %.1f\n", add__double(1.25, 2.25));
+    {
+        struct Tracer t;
+        Tracer_init(&t, "inner");
+        printf("inside scope\n");
+        Tracer_destroy(&t);
+    }
+    printf("after scope\n");
+    return 0;
+}#phcc-member	kind=gap	name=-	span=3347-3348	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+2	gap	-	0-432	928e97a8f368ca461e130048cbbe2f7efcebd10d282b229845aea7a88eae6acd
+3	gap	-	432-450	a3f2a419e8409f8b43d6084814d8c4f563b7e56ddc89a2c62d34675e27b0ff27
+4	gap	-	450-451	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+5	type	Shape	451-579	8d68ac4871fd3fc2e6c78685b14f33a4b68feeeb7bba22a805873c5eb37048c8
+6	gap	-	579-581	75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+7	type	Circle	581-801	a401ad62dd72d6c7a0c1c82a50e5e063d00a4eca6187661916cce464841e6fb9
+8	gap	-	801-803	75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+9	type	Square	803-999	534da86ef1ebf545d1245dee64f881778abaf4755b60b83e987294e0ae6e08b9
+10	gap	-	999-1001	75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+11	function	add	1001-1056	8d843c305e7fc77c7c9bac9dd55ee520f077276cef9391299efba26655f15ad5
+12	gap	-	1056-1058	75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+13	type	Tracer	1058-1265	e7400cdc502a86bea1eeba26bdf850fc21d9e03e7dab7c44ea8f43ad1b934fca
+14	gap	-	1265-1267	75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+15	function	main	1267-1670	c00e455df60c7cd8fe74c4290d7d1b3ef37d0f618f42f03bd4ba17fab4e6d30d
+16	gap	-	1670-1671	01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+#phcpp-commentary	kind=gap	name=-	span=0-432	sha256=928e97a8f368ca461e130048cbbe2f7efcebd10d282b229845aea7a88eae6acd
+// slice.cpp — phcpp vertical slice v0 (C++23 source of truth).
+//
+// Exercises exactly three C++ features, per the slice charter:
+//   1. a class with a virtual function (polymorphic dispatch),
+//   2. a function template, instantiated twice,
+//   3. a destructor with an observable side effect.
+// Output is fully deterministic and produced with std::printf so the
+// hand-lowered C translation unit can match it byte-for-byte.
+#phcpp-commentary	kind=gap	name=-	span=432-450	sha256=a3f2a419e8409f8b43d6084814d8c4f563b7e56ddc89a2c62d34675e27b0ff27
+#include <cstdio>
+#phcpp-commentary	kind=gap	name=-	span=450-451	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
+#phcpp-commentary	kind=type	name=Shape	span=451-579	sha256=8d68ac4871fd3fc2e6c78685b14f33a4b68feeeb7bba22a805873c5eb37048c8
+struct Shape {
+    virtual ~Shape() = default;
+    virtual double area() const = 0;
+    virtual const char* name() const = 0;
+};#phcpp-commentary	kind=gap	name=-	span=579-581	sha256=75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+
+
+#phcpp-commentary	kind=type	name=Circle	span=581-801	sha256=a401ad62dd72d6c7a0c1c82a50e5e063d00a4eca6187661916cce464841e6fb9
+struct Circle : Shape {
+    double r;
+    explicit Circle(double radius) : r(radius) {}
+    double area() const override { return 3.141592653589793 * r * r; }
+    const char* name() const override { return "circle"; }
+};#phcpp-commentary	kind=gap	name=-	span=801-803	sha256=75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+
+
+#phcpp-commentary	kind=type	name=Square	span=803-999	sha256=534da86ef1ebf545d1245dee64f881778abaf4755b60b83e987294e0ae6e08b9
+struct Square : Shape {
+    double s;
+    explicit Square(double side) : s(side) {}
+    double area() const override { return s * s; }
+    const char* name() const override { return "square"; }
+};#phcpp-commentary	kind=gap	name=-	span=999-1001	sha256=75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+
+
+#phcpp-commentary	kind=function	name=add	span=1001-1056	sha256=8d843c305e7fc77c7c9bac9dd55ee520f077276cef9391299efba26655f15ad5
+template <typename T>
+T add(T a, T b) { return a + b; }#phcpp-commentary	kind=gap	name=-	span=1056-1058	sha256=75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+
+
+#phcpp-commentary	kind=type	name=Tracer	span=1058-1265	sha256=e7400cdc502a86bea1eeba26bdf850fc21d9e03e7dab7c44ea8f43ad1b934fca
+struct Tracer {
+    const char* id;
+    explicit Tracer(const char* name) : id(name) {
+        std::printf("tracer %s constructed\n", id);
+    }
+    ~Tracer() { std::printf("tracer %s destroyed\n", id); }
+};#phcpp-commentary	kind=gap	name=-	span=1265-1267	sha256=75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070
+
+
+#phcpp-commentary	kind=function	name=main	span=1267-1670	sha256=c00e455df60c7cd8fe74c4290d7d1b3ef37d0f618f42f03bd4ba17fab4e6d30d
+int main() {
+    Circle c(2.0);
+    Square q(3.0);
+    Shape* shapes[2] = { &c, &q };
+    for (Shape* s : shapes)
+        std::printf("%s area %.2f\n", s->name(), s->area());
+    std::printf("add int %d\n", add(19, 23));
+    std::printf("add double %.1f\n", add(1.25, 2.25));
+    {
+        Tracer t("inner");
+        std::printf("inside scope\n");
+    }
+    std::printf("after scope\n");
+    return 0;
+}#phcpp-commentary	kind=gap	name=-	span=1670-1671	sha256=01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b
+
