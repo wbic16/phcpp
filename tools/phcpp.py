@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""phcpp.py — phcpp v0 phext tooling: pack / verify / unpack.
+"""phcpp.py — phcpp phext tooling: pack / verify / unpack.
 
-phcpp is a lowering front end. A C++23 translation unit is lowered to
-C; both live in ONE phext:
+phcpp is a lowering front end. A C++23RA translation unit is lowered
+to C; both live in ONE phext:
 
   - the lowered C is ordinary phcc material (Collection 4 / Source,
     Volume 2 whole-file scroll + Volume 3 member segments carrying
@@ -38,13 +38,36 @@ LEVEL_BYTES = [0x01, 0x1F, 0x1E, 0x1D, 0x1C, 0x1A, 0x19, 0x18, 0x17]
 DELIM_SET = set(LEVEL_BYTES)
 DELIM_TO_LEVEL = {b: i for i, b in enumerate(LEVEL_BYTES)}
 
-PHCC_BASELINE = "d0659ba4"
-PHCPP_VERSION = "0.0.0"
+PHCC_BASELINE = "36a7932f"
+PHCPP_VERSION = "0.1.0"
 
 # Coordinates: (library, shelf, series, collection, volume, book,
 # chapter, section, scroll) — phcc's tuple order.
 MANIFEST = (1, 1, 1, 1, 2, 10, 1, 1, 1)
 NOTES    = (1, 1, 1, 1, 2, 10, 1, 2, 1)
+LEDGER   = (1, 1, 1, 1, 2, 10, 1, 3, 1)
+
+# The C++23RA construct-revision registry (docs/ABI-REVISIONS.md),
+# duplicated here literally on purpose: verify must be able to check
+# the front end's ledger without importing the front end.
+CONSTRUCT_REVISIONS = {
+    "mangling.readable": 1,
+    "namespace.flatten": 1,
+    "layout.struct": 1,
+    "vtable.shape": 1,
+    "ctor-dtor.explicit": 1,
+    "calling.explicit-this": 1,
+    "calling.byvalue-out": 1,
+    "template.instantiation": 1,
+    "reference.pointer": 1,
+    "lambda.closureless": 1,
+}
+
+
+def stamp_of(constructs):
+    if not constructs:
+        return "r0"
+    return "r%d" % max(CONSTRUCT_REVISIONS[c] for c in constructs)
 C_FILE   = (1, 1, 1, 4, 2, 1, 1, 1, 1)
 C_INDEX  = (1, 1, 1, 4, 3, 1, 1, 1, 1)
 C_SEG0   = (1, 1, 1, 4, 3, 1, 1, 1, 2)   # scroll component increments
@@ -206,19 +229,23 @@ def member_name(text):
 
 
 # ------------------------------------------------------------ pack
-LAYOUT_NOTES = f"""# slice.phext — layout notes (phcpp pack, v0)
+LAYOUT_NOTES = f"""# layout notes (phcpp pack, v1)
 
-One file: a C++23 translation unit, its hand-lowered C, and the
-provenance binding them. Outer dimensions 1.1.1 throughout.
+One file: a C++23RA translation unit, its mechanically lowered C,
+the C++23RA feature ledger, and the provenance binding them.
+Outer dimensions 1.1.1 throughout.
 
 - Collection 1 (Meta), Volume 2, Book 10: Section 1 = placement
   manifest (kind, path, coordinate, SHA-256, size); Section 2 = this
-  notes scroll. Kinds: `c` (build input) and `cpp-commentary`
-  (provenance only — never a build input).
+  notes scroll; Section 3 = the feature ledger (present when the
+  pack was made by the front end: per-member construct sets and
+  C++23RA revision stamps, docs/ABI-REVISIONS.md). Kinds: `c`
+  (build input) and `cpp-commentary` (provenance only — never a
+  build input). The ledger is recorded on a manifest line that is
+  not a kind= row, so `unpack` never exports it.
 - Collection 4 (Source), Volume 2, Book 1, Chapter 1, Section 1:
   the lowered C file, whole bytes — the only file scroll `unpack`
-  will export for building, byte-identical to the tree's
-  examples/slice/lowered/slice.c.
+  will export for building.
 - Collection 4 (Source), Volume 3: member segmentation of the
   lowered C — index scroll + segment scrolls carrying `#phcc-member`
   headers, exactly phcc's format; payloads tile the C file exactly.
@@ -260,7 +287,11 @@ def build_volume(scrolls, base_index, base_seg, marker, data, segs):
 def cmd_pack(args):
     cpp = Path(args.cpp).read_bytes()
     c = Path(args.c).read_bytes()
-    for label, blob in (("cpp", cpp), ("c", c)):
+    ledger = Path(args.ledger).read_bytes() if args.ledger else None
+    baseline = args.phcc_baseline or PHCC_BASELINE
+    for label, blob in (("cpp", cpp), ("c", c), ("ledger", ledger)):
+        if blob is None:
+            continue
         bad = DELIM_SET.intersection(blob)
         if bad:
             sys.exit(f"pack: {label} source contains phext delimiter "
@@ -270,16 +301,22 @@ def cmd_pack(args):
     build_volume(scrolls, C_INDEX, C_SEG0, "#phcc-member", c, segment(c))
     build_volume(scrolls, CPP_INDEX, CPP_SEG0, "#phcpp-commentary",
                  cpp, segment(cpp))
+    if ledger is not None:
+        scrolls[LEDGER] = ledger
     scrolls[NOTES] = LAYOUT_NOTES.encode()
     manifest = [
         "phcpp-manifest 1",
         f"phcpp-version: {PHCPP_VERSION}",
-        f"phcc-baseline: {PHCC_BASELINE}",
+        f"phcc-baseline: {baseline}",
         f"kind=c\tpath={args.c_path}\tcoord={fmt(C_FILE)}\t"
         f"sha256={sha256(c)}\tsize={len(c)}",
         f"kind=cpp-commentary\tpath={args.cpp_path}\tcoord={fmt(CPP_INDEX)}\t"
         f"sha256={sha256(cpp)}\tsize={len(cpp)}",
     ]
+    if ledger is not None:
+        manifest.append(
+            f"ledger\tcoord={fmt(LEDGER)}\tsha256={sha256(ledger)}\t"
+            f"size={len(ledger)}")
     scrolls[MANIFEST] = ("\n".join(manifest) + "\n").encode()
     Path(args.out).write_bytes(implode(scrolls))
     print(f"pack: wrote {args.out} "
@@ -349,6 +386,78 @@ def check_volume(scrolls, index_coord, marker, file_bytes, label):
     return len(scrolls[index_coord].decode().splitlines())
 
 
+def check_ledger(scrolls):
+    """If the manifest records a ledger, verify it end to end:
+    scroll hash, registry agreement, and — the ABI SS6 rule — every
+    member row's SHA-256 against the actual Volume 3 segment payload
+    (a segment edited after stamping no longer matches, so its stamp
+    is demoted: the ledger on disk simply fails verify), plus every
+    stamp recomputed from the construct registry. Returns the member
+    count, or None when the phext carries no ledger."""
+    raw = scrolls[MANIFEST].decode()
+    line = None
+    for ln in raw.splitlines():
+        if ln.startswith("ledger\t"):
+            line = dict(kv.split("=", 1) for kv in ln.split("\t")[1:])
+    if line is None:
+        return None
+    coord = parse_coord(line["coord"])
+    if coord not in scrolls:
+        raise Fail("ledger scroll missing")
+    blob = scrolls[coord]
+    if sha256(blob) != line["sha256"]:
+        raise Fail("ledger SHA-256 mismatch vs manifest")
+    rows = blob.decode().splitlines()
+    if not rows or rows[0] != "phcpp-ledger 1":
+        raise Fail("ledger header line bad")
+    registry = ",".join(f"{k}={v}" for k, v in
+                        sorted(CONSTRUCT_REVISIONS.items()))
+    if f"constructs-registry: {registry}" not in rows:
+        raise Fail("ledger construct registry disagrees with the "
+                   "C++23RA registry")
+    if "symbols:" not in rows or "members:" not in rows:
+        raise Fail("ledger sections missing")
+    si, mi = rows.index("symbols:"), rows.index("members:")
+    sym_rows = rows[si + 1:mi]
+    mem_rows = [r for r in rows[mi + 1:]
+                if not r.startswith("required:")]
+    required = set()
+    for r in sym_rows + mem_rows:
+        f = dict(kv.split("=", 1) for kv in r.split("\t")[1:])
+        cons = f["constructs"].split(",") if f["constructs"] else []
+        for cn in cons:
+            if cn not in CONSTRUCT_REVISIONS:
+                raise Fail(f"ledger names unknown construct {cn}")
+        if f["stamp"] != stamp_of(cons):
+            raise Fail(f"ledger stamp for {r.split(chr(9))[0]} does not "
+                       f"recompute from its construct set")
+        required |= set(cons)
+    seg_rows = []
+    for ln in scrolls[C_INDEX].decode().splitlines():
+        no, kind, name, span, isha = ln.split("\t")
+        if kind != "gap":
+            seg_rows.append((C_INDEX[:8] + (int(no),), isha))
+    if len(seg_rows) != len(mem_rows):
+        raise Fail(f"ledger has {len(mem_rows)} member rows but the "
+                   f"C index has {len(seg_rows)} non-gap segments")
+    for r, (scoord, isha) in zip(mem_rows, seg_rows):
+        f = dict(kv.split("=", 1) for kv in r.split("\t")[1:])
+        if f["coord"] != fmt(scoord):
+            raise Fail(f"ledger member {r.split(chr(9))[0]} records "
+                       f"coord {f['coord']}, segment is at "
+                       f"{fmt(scoord)}")
+        if f["sha256"] != isha:
+            raise Fail(f"ledger member {r.split(chr(9))[0]} SHA-256 "
+                       f"does not match the segment payload — the "
+                       f"segment changed after stamping (stamp demoted)")
+    req_line = [r for r in rows if r.startswith("required:")]
+    if len(req_line) != 1 or \
+            set(req_line[0].split(": ", 1)[1].split(",")) != required:
+        raise Fail("ledger required-constructs line disagrees with "
+                   "the member rows")
+    return len(mem_rows)
+
+
 def cmd_verify(args):
     scrolls = load_phext(args.phext)
     try:
@@ -385,13 +494,18 @@ def cmd_verify(args):
         assert n_cpp == n_cpp2
         if sha256(cpp_bytes) != prow["sha256"]:
             raise Fail("cpp-commentary tiling SHA-256 mismatch vs manifest")
+        n_led = check_ledger(scrolls)
     except Fail as e:
         print(f"verify: FAIL — {e}")
         return 1
-    print(f"verify: PASS — manifest hashes ok; {n_c} C segments "
-          f"(#phcc-member) tile the lowered C; {n_cpp} commentary "
-          f"segments (#phcpp-commentary) tile the C++ and are "
-          f"isolated from every build input")
+    msg = (f"verify: PASS — manifest hashes ok; {n_c} C segments "
+           f"(#phcc-member) tile the lowered C; {n_cpp} commentary "
+           f"segments (#phcpp-commentary) tile the C++ and are "
+           f"isolated from every build input")
+    if n_led is not None:
+        msg += (f"; ledger ok: {n_led} members, stamps recompute, "
+                f"member hashes match their segments")
+    print(msg)
     return 0
 
 
@@ -446,6 +560,12 @@ def main():
                    help="path recorded in the manifest for the C++ file")
     p.add_argument("--c-path", required=True,
                    help="path recorded in the manifest for the C file")
+    p.add_argument("--ledger",
+                   help="feature-ledger text to inscribe at "
+                        "1.1.1/1.2.10/1.3.1 (front-end packs)")
+    p.add_argument("--phcc-baseline",
+                   help="phcc commit this pack stands against "
+                        "(default: the PHCC_BASELINE constant)")
     p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_pack)
     v = sub.add_parser("verify")
