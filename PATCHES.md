@@ -20,6 +20,15 @@ It is a lowering front end whose back end is phcc at a named commit:
   tooling reads phcpp phexts without modification, and no phcc
   scroll changes meaning.
 
+## Language naming + ABI directive
+
+The dialect phcpp compiles is named **C++23RA** (Will, 2026-11-07,
+task 32.6.10/7.6.11/6.6.9): a fork of C++23 supporting **revisioned
+ABIs** — per-construct ABI revisions with per-symbol minimal-revision
+stamps, so libraries need not recompile when new language features
+land unless they use them. Model: `docs/ABI-REVISIONS.md` (design;
+implementation gated on front-end v1).
+
 ## phcpp's own patches
 
 phcpp has no upstream of its own yet: the seed is original work

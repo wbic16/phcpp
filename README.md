@@ -1,11 +1,17 @@
-# phcpp — C++23, lowered to phcc scrolls
+# phcpp — C++23RA, lowered to phcc scrolls
 
-**phcpp provides phext support for C++23, using phcc as the baseline.**
+**phcpp provides phext support for C++23RA, using phcc as the baseline.**
 
-phcpp is a *lowering front end*, not a compiler. A C++23 translation
+**C++23RA** is phcpp's fork of C++23: C++23 with **R**evisioned
+**A**BIs. The ABI is revised per lowering construct, not per
+language version, so existing libraries do not recompile when new
+language features land — unless they use the new features. The
+model is `docs/ABI-REVISIONS.md` (design; not yet implemented).
+
+phcpp is a *lowering front end*, not a compiler. A C++23RA translation
 unit is lowered to C; the C is packed into a phext as ordinary phcc
 scrolls and handed off to [phcc](https://github.com/wbic16/phcc),
-which does all code generation. The original C++ rides in the same
+which does all code generation. The original C++23RA rides in the same
 phext **marked as commentary** — present, addressable, hash-bound
 provenance that is never a build input.
 
@@ -13,23 +19,23 @@ The handoff, in one diagram-in-words:
 
 ```
 slice.cpp ──lower──▶ slice.c ──pack──▶ slice.phext ──unpack──▶ slice.c ──phcc──▶ binary
-  C++23               C                 one file        kind=c only    baseline
+  C++23RA             C                 one file        kind=c only    baseline
                           ▲                 │
                           └─── the phext also carries slice.cpp segmented
                                as #phcpp-commentary scrolls (Volume 4):
                                provenance, never compiled
 ```
 
-Because both halves live in one hash-bound file, the C++ a human
+Because both halves live in one hash-bound file, the C++23RA a human
 wrote and the C the machine compiled cannot drift apart silently:
-corrupt the C++ commentary and the build output is bit-identical,
+corrupt the C++23RA commentary and the build output is bit-identical,
 while `phcpp verify` fails and names the segment. Provenance without
 exposure — see `examples/slice/RECEIPTS.md` for the proof, run.
 
 ## Quickstart (the v0 slice)
 
 ```sh
-# pack the slice: C++ source + hand-lowered C -> one phext
+# pack the slice: C++23RA source + hand-lowered C -> one phext
 python3 tools/phcpp.py pack \
   --cpp examples/slice/slice.cpp --c examples/slice/lowered/slice.c \
   --cpp-path examples/slice/slice.cpp --c-path examples/slice/lowered/slice.c \
@@ -55,7 +61,7 @@ receipts. The slice's lowering was done **by hand** and is labelled
 as such everywhere; it is the template the first mechanical lowerer
 will be graded against.
 
-What does not exist yet: a C++ parser, a mechanical lowerer, a
+What does not exist yet: a C++23RA parser, a mechanical lowerer, a
 lowered library. The front-end question (hand-rolled subset parser
 vs an adapted open front end's AST) is priced in `docs/DESIGN.md`
 §4 as a **proposal — Will rules on it**. Exceptions, RTTI, multiple

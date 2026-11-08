@@ -1,11 +1,14 @@
 # phcpp — design
 
-**phcpp provides phext support for C++23, using phcc as the baseline.**
-A C++23 translation unit is *lowered* to C. The C is ordinary phcc
+**phcpp provides phext support for C++23RA, using phcc as the baseline.**
+The language phcpp compiles is **C++23RA** — the fork of the C++23
+standard with revisioned ABIs (`docs/ABI-REVISIONS.md`); "C++23" in
+this document means the upstream standard, "C++23RA" the dialect.
+A C++23RA translation unit is *lowered* to C. The C is ordinary phcc
 material — phcc scrolls — and is handed off to phcc, which does all
-code generation. The C++ source rides in the same phext **marked as
+code generation. The C++23RA source rides in the same phext **marked as
 commentary**: present, addressable, hash-bound provenance — and never
-a build input. One phext holds both, so the C++ a human wrote and the
+a build input. One phext holds both, so the C++23RA a human wrote and the
 C the machine compiled can never drift apart without a hash noticing.
 
 This document is the v0 design. Where v0 is a hand-driven slice
@@ -15,13 +18,13 @@ rather than a built mechanism, it says so.
 
 ```
  slice.cpp ──lower──▶ slice.c ──pack──▶ slice.phext ──unpack──▶ slice.c ──phcc──▶ binary
- (C++23)              (C)               (one file)      (kind=c only)   (baseline)
+ (C++23RA)            (C)               (one file)      (kind=c only)   (baseline)
                  ▲                          │
                  └────── the same phext also carries slice.cpp,
                          segmented, as #phcpp-commentary scrolls
 ```
 
-phcpp owns exactly three things: the lowering (C++ → C), the phext
+phcpp owns exactly three things: the lowering (C++23RA → C), the phext
 layout below, and the tooling that enforces it (`tools/phcpp.py`:
 pack / verify / unpack). phcc owns everything after the handoff:
 parsing C, code generation, linking. phcpp carries no fork of phcc's
@@ -41,17 +44,17 @@ and vice versa) and adds one volume:
 | `1.1.1/1.2.10/1.2.1` | Layout notes scroll (what pack wrote, in words). |
 | Collection 4, Volume 2 | Lowered C, whole-file scrolls — the only file scrolls `unpack` exports. Placed as phcc places C: Book = module, Chapter = component, Section = file. |
 | Collection 4, Volume 3 | Member segmentation of the lowered C: index scroll + segment scrolls with `#phcc-member` headers (kind/name/span/SHA-256), payloads tiling each C file exactly. Identical in form to phcc's Volume 3, so phcc's member tooling (analyze, the statement tier) works on lowered C unchanged. |
-| Collection 4, Volume 4 | **The C++ source, segmented**: index scroll + segment scrolls, each opening with a `#phcpp-commentary` header line (kind/name/span/SHA-256), payloads tiling each C++ file exactly. |
+| Collection 4, Volume 4 | **The C++23RA source, segmented**: index scroll + segment scrolls, each opening with a `#phcpp-commentary` header line (kind/name/span/SHA-256), payloads tiling each C++23RA file exactly. |
 
 ### The commentary marking — chosen design
 
-Every C++ segment scroll's first line is exactly
+Every C++23RA segment scroll's first line is exactly
 
 ```
 #phcpp-commentary\tkind=<kind>\tname=<name>\tspan=<start>-<end>\tsha256=<payload sha256>
 ```
 
-and the C++ has **no whole-file scroll anywhere** — it exists only as
+and the C++23RA has **no whole-file scroll anywhere** — it exists only as
 Volume 4 commentary segments. This follows the house precedent for
 machine-checkable one-line markers (`#phcc-member`,
 `#phcc-dedup-ref <coord> <sha256>`, `#phcc-stmt-ref …`): a scroll's
@@ -60,16 +63,16 @@ class is decidable from its first line, exactly, never heuristically.
 Why this design, against the alternatives:
 
 - **A dedicated C++ phase/collection** (e.g. a new Collection for
-  "C++ source") was rejected: the 6D UML model fixes Collection =
-  SDLC phase, and the C++ *is* Source-phase material — it is the
+  "C++23RA source") was rejected: the 6D UML model fixes Collection =
+  SDLC phase, and the C++23RA *is* Source-phase material — it is the
   source of truth the C was lowered from. Exiling it to another
   collection would also hide it from Source-phase tooling (census,
   statements) for no benefit; the isolation the design needs is not
   "elsewhere", it is "never compiled", and that is a property of the
   unpack path, not of geography.
-- **A marker comment inside the C++ text** (e.g. wrapping the C++ in
+- **A marker comment inside the C++23RA text** (e.g. wrapping the C++23RA in
   C comments inside a C file scroll) was rejected: it would make the
-  C++ a build input the moment anything mis-parses, and silent
+  C++23RA a build input the moment anything mis-parses, and silent
   inclusion is the failure class this programme exists to kill
   (cf. F5's macro-eaten attributes, F23/F24's dead-branch leaks).
   Commentary must fail *closed*: unreachable by construction, not
@@ -126,6 +129,16 @@ tomorrow) can apply and a reader can check in the phext:
   Itanium-mangled names. Itanium support is a linking feature to be
   added when mixed-toolchain linking is a goal, not a v0 property.
 
+- **ABI identity is part of the lowering model.** The mangling
+  form, the vtable shape, and the layout rules above are
+  ABI-affecting constructs, and C++23RA stamps each lowered symbol
+  with the minimal revision of the constructs its own lowering
+  depends on — so a construct's revision can move without forcing
+  the world to recompile. The full model (feature ledger,
+  name-stability rule, link-time enforcement via symbol
+  versioning) is `docs/ABI-REVISIONS.md`. It is design, not
+  mechanism: no ledger exists until a mechanical lowerer does.
+
 ### In / out for v0 — honestly
 
 **In** (conventions defined; the slice exercises the first three):
@@ -149,7 +162,7 @@ front end's job, §4).
 
 ## 4. The front-end question — proposal, Will rules
 
-Nothing in §§1–3 answers how C++23 text becomes an AST to lower
+Nothing in §§1–3 answers how C++23RA text becomes an AST to lower
 from. That is the programme's biggest open decision, and this
 document's job is to price the options, not to smuggle one in.
 
@@ -159,14 +172,14 @@ small, auditable object in the phcc style. The price is the C++23
 grammar itself: among the hardest in production languages —
 context-sensitive lexing (the `<` of templates vs less-than),
 two-phase name lookup, the most-vexing-parse family, SFINAE and
-concepts. A *complete* from-scratch C++23 front end is a multi-year
+concepts. A *complete* from-scratch C++23RA front end is a multi-year
 object for a team. A subset parser is viable **only** under the
 programme's standing discipline: it must fail loudly, by
 construction, on anything outside its grammar — never guess. The
 subset worth having first is the systems-code core: the C language,
 classes, templates, namespaces-as-mangling — plausibly most of what
 the gate's C projects would look like as C++, and none of it
-sufficient for arbitrary C++23.
+sufficient for arbitrary C++23RA.
 
 **Option B — adapt an existing open front end's AST, fork-patch
 discipline.** Clang's AST (via libclang or a Clang tool) is the
@@ -187,7 +200,7 @@ now: Option A, slice-grown under a hard-fail grammar, because it
 keeps phcpp self-contained and every one of its limits is a named,
 loud refusal. Track 2, decision-gated: prototype the Clang-AST
 adapter behind the same lowering model, and let a differential
-corpus (same C++ program through both tracks; lowered C compared
+corpus (same C++23RA program through both tracks; lowered C compared
 behaviourally under phcc) arbitrate which track carries which
 language surface. The phext layout and lowering model in this
 document are deliberately front-end-agnostic: both tracks emit the
@@ -203,13 +216,13 @@ phcpp takes phcc's evidentiary rules whole:
   receipts to STALE until re-issued. There is no silent edit.
 - **The oracle is g++.** A lowering is correct *for a program* when
   phcc's build of the lowered C produces byte-identical stdout and
-  exit status to `g++ -std=c++23`'s build of the C++ — the
+  exit status to `g++ -std=c++23`'s build of the C++23RA — the
   conformance programme's (compile class, run exit, stdout bytes)
   triple, with every divergence classified (a) phcpp defect,
   (b) intentional/documented, (c) undefined/implementation-defined.
   A receipt with an unclassified divergence is not a receipt.
 - **The gate is external and report-only**, exactly as phcc's: a
-  C++ corpus, lowered and run through the triple, verdict recorded
+  C++23RA corpus, lowered and run through the triple, verdict recorded
   as a scroll in the phext. phcpp's corpus starts as the slice and
   grows one accepted feature at a time — a feature is "in" when the
   corpus carries its receipt, not when the lowerer emits something
@@ -239,7 +252,7 @@ Windows → WASM**, for phcc, phcpp, and phst alike.
 
 What exists in this seed: the layout, the commentary discipline and
 its enforcing tool, one hand-lowered slice with full receipts, and
-this design. What does not: a C++ parser, a mechanical lowerer, a
+this design. What does not: a C++23RA parser, a mechanical lowerer, a
 library, a corpus beyond one program. The slice's lowering was done
 **by hand** and is labelled as such in its source, its phext's
 layout notes, and its receipts — it proves the handoff loop and the
